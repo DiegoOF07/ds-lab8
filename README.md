@@ -119,7 +119,73 @@ generar los resultados principales.
 
 ## Como levantar el ambiente
 
-<!-- TODO (Ejercicio 1.5) -->
+1. Clonar el fork y entrar al directorio:
+
+   ```bash
+   git clone https://github.com/DiegoOF07/duckdb_lab8.git
+   cd duckdb_lab8
+   ```
+
+2. Construir las imagenes y levantar los servicios en segundo plano:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+3. Verificar que los servicios esten arriba:
+
+   ```bash
+   docker compose ps                                # lab8-lab y lab8-metabase en estado "Up"
+   curl -s localhost:3000/api/health                # {"status":"ok"} (Metabase tarda ~1 min en iniciar)
+   docker compose exec lab python -c "import duckdb; print(duckdb.__version__)"   # 1.5.5
+   ```
+
+4. Abrir las herramientas:
+   - JupyterLab: <http://localhost:8888> (sin token).
+   - Metabase: <http://localhost:3000>.
+
+5. Para detener el ambiente se usa `docker compose down`. Con
+   `docker compose down -v` tambien se borra el volumen de Metabase. Los datos
+   en `data/` se conservan porque viven en la carpeta del proyecto.
+
+Los comandos del proyecto se ejecutan dentro del contenedor `lab`, con
+`docker compose exec lab <comando>`. Dentro del contenedor, el directorio de
+trabajo es `/workspace`.
+
+### Herramientas disponibles
+
+| Servicio | Herramienta | Version | Uso |
+|---|---|---|---|
+| `lab` | Python | 3.11.14 | lenguaje base |
+| `lab` | DuckDB (modulo Python) | 1.5.5 | motor SQL analitico. No incluye el CLI `duckdb`; se usa desde Python |
+| `lab` | JupyterLab | 4.6.4 | notebooks, puerto 8888 |
+| `lab` | pandas / pyarrow | 3.0.6 / 25.0.1 | DataFrames y lectura de Parquet |
+| `lab` | matplotlib | 3.11.2 | visualizaciones |
+| `lab` | requests, curl | 2.34.2 | descarga de datos |
+| `metabase` | Metabase + driver DuckDB | v0.63.19 / 1.5.5.0 | tableros, puerto 3000 (Java 21) |
+
+El contenedor `lab` monta `data/`, `notebooks/`, `scripts/`, `sql/` y `docs/`,
+asi que lo que se edita en el host se ve de inmediato dentro del contenedor.
+Metabase monta `data/` en `/workspace/data` y guarda su configuracion en el
+volumen `metabase-data`.
+
+### Por que un ambiente reproducible
+
+- **Mismos resultados en cualquier maquina.** Las versiones de Python y de cada
+  libreria estan fijadas en `Dockerfile` y `requirements.txt`. Una consulta o
+  un benchmark da el mismo resultado en la computadora de cualquier integrante
+  o del docente, sin depender de lo que cada quien tenga instalado.
+- **Compatibilidad entre componentes.** DuckDB 1.5.5 y el driver de Metabase
+  deben coincidir, porque un archivo `.duckdb` creado con otra version puede no
+  abrirse. El ambiente garantiza esa alineacion.
+- **Aislamiento.** No se instala nada en el sistema anfitrion ni se generan
+  conflictos con otros proyectos.
+- **Trazabilidad y verificacion.** Como el ambiente esta versionado junto con el
+  codigo, cualquier persona puede reconstruir exactamente el contexto en que se
+  obtuvieron los resultados. Esa es la base de un analisis de datos
+  verificable.
+- **Arranque rapido.** Un solo comando (`docker compose up`) deja listo todo el
+  ambiente para un integrante nuevo.
 
 ## Como descargar los datos
 
