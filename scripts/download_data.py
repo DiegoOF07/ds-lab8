@@ -20,21 +20,29 @@ Comportamiento:
   - La TLC publica cada mes con varias semanas de atraso, por lo que no todos
     los meses de 2026 existen todavia. El script consulta al servidor que
     meses estan publicados en lugar de suponerlos.
-  - Un archivo que ya existe localmente no se vuelve a descargar.
+  - Un archivo que ya existe localmente no se vuelve a descargar, siempre que
+    su tamanio coincida con el publicado (Content-Length). Si difiere se
+    considera incompleto y se descarga de nuevo.
+  - Cada archivo se valida leyendo su metadata Parquet (cantidad de filas).
+  - Al terminar se escribe data/raw/manifest_<anio>.csv con el detalle de
+    cada archivo, que sirve para verificar que la descarga esta completa.
   - La descarga se hace sobre un nombre temporal y solo se renombra al
     terminar, de modo que una interrupcion no deja archivos .parquet a medias.
 """
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
+import pyarrow.parquet as pq
 import requests
 
 ANIO = 2026
 TIPOS_TAXI = ("yellow", "green")
 URL_BASE = "https://d37ci6vzurychx.cloudfront.net/trip-data"
 DIR_DESTINO = Path("data/raw")
+MANIFIESTO = DIR_DESTINO / f"manifest_{ANIO}.csv"
 
 TIEMPO_ESPERA = 60          # segundos por peticion
 INTENTOS = 3                # intentos por archivo antes de darse por vencido
@@ -57,13 +65,24 @@ def ruta_destino(tipo: str, mes: int) -> Path:
     return DIR_DESTINO / tipo / str(ANIO) / construir_nombre(tipo, mes)
 
 
-def esta_publicado(url: str) -> bool:
-    """Indica si el archivo existe en el servidor (sin descargarlo)."""
+class SinConexion(Exception):
+    """El servidor no respondio, por lo que no se sabe si el archivo existe."""
+
+
+def tamanio_remoto(url: str) -> int | None:
+    """Content-Length del archivo en el servidor, o None si no esta publicado."""
     try:
         respuesta = requests.head(url, timeout=TIEMPO_ESPERA, allow_redirects=True)
-    except requests.RequestException:
-        return False
-    return respuesta.ok
+    except requests.RequestException as error:
+        raise SinConexion(str(error)) from error
+    if not respuesta.ok:
+        return None
+    return int(respuesta.headers.get("Content-Length", 0)) or None
+
+
+def filas_parquet(ruta: Path) -> int:
+    """Cantidad de filas segun el footer del Parquet; falla si no es legible."""
+    return pq.read_metadata(ruta).num_rows
 
 
 def formato_tamanio(n: float) -> str:
@@ -74,8 +93,8 @@ def formato_tamanio(n: float) -> str:
     return f"{n:.1f} GiB"
 
 
-def descargar_archivo(url: str, destino: Path) -> int:
-    """Descarga `url` en `destino`. Devuelve la cantidad de bytes escritos."""
+def descargar_archivo(url: str, destino: Path, esperado: int) -> int:
+    """Descarga `url` en `destino` y verifica que pese `esperado` bytes."""
     destino.parent.mkdir(parents=True, exist_ok=True)
     temporal = destino.with_name(destino.name + SUFIJO_TEMPORAL)
 
@@ -90,8 +109,10 @@ def descargar_archivo(url: str, destino: Path) -> int:
                         if bloque:
                             archivo.write(bloque)
                             escritos += len(bloque)
-            if escritos == 0:
-                raise requests.RequestException("el servidor devolvio un archivo vacio")
+            if escritos != esperado:
+                raise requests.RequestException(
+                    f"descarga incompleta ({escritos} de {esperado} bytes)"
+                )
             temporal.replace(destino)
             return escritos
         except requests.RequestException as error:
@@ -106,34 +127,76 @@ def descargar_archivo(url: str, destino: Path) -> int:
 def descargar(tipo: str) -> dict:
     """Descarga todos los meses publicados de un tipo de taxi para 2026."""
     print(f"\n=== {tipo.upper()} {ANIO} ===")
-    resumen = {"descargados": 0, "omitidos": 0, "no_publicados": [], "fallidos": []}
+    resumen = {"descargados": 0, "omitidos": 0, "no_publicados": [],
+               "fallidos": [], "manifiesto": []}
 
     for mes in range(1, 13):
         etiqueta = f"{ANIO}-{mes:02d}"
         destino = ruta_destino(tipo, mes)
-
-        if destino.exists() and destino.stat().st_size > 0:
-            print(f"  {etiqueta}  ya existe, se omite")
-            resumen["omitidos"] += 1
-            continue
-
         url = construir_url(tipo, mes)
-        if not esta_publicado(url):
+        local = destino.stat().st_size if destino.exists() else 0
+
+        try:
+            remoto = tamanio_remoto(url)
+        except SinConexion as error:
+            if local:
+                print(f"  {etiqueta}  sin conexion, se conserva el archivo local")
+                remoto = local
+            else:
+                print(f"  {etiqueta}  ERROR: {error}")
+                resumen["fallidos"].append(etiqueta)
+                continue
+
+        if remoto is None:
             print(f"  {etiqueta}  aun no publicado por la TLC")
             resumen["no_publicados"].append(etiqueta)
             continue
 
-        print(f"  {etiqueta}  descargando...")
-        try:
-            escritos = descargar_archivo(url, destino)
-        except requests.RequestException as error:
-            print(f"  {etiqueta}  ERROR: {error}")
-            resumen["fallidos"].append(etiqueta)
+        if local == remoto:
+            print(f"  {etiqueta}  ya existe, se omite")
+            estado = "existente"
         else:
-            print(f"  {etiqueta}  listo ({formato_tamanio(escritos)}) -> {destino}")
-            resumen["descargados"] += 1
+            if local:
+                print(f"  {etiqueta}  incompleto ({local} de {remoto} bytes), se descarga de nuevo")
+            print(f"  {etiqueta}  descargando...")
+            try:
+                descargar_archivo(url, destino, remoto)
+            except requests.RequestException as error:
+                print(f"  {etiqueta}  ERROR: {error}")
+                resumen["fallidos"].append(etiqueta)
+                continue
+            print(f"  {etiqueta}  listo ({formato_tamanio(remoto)}) -> {destino}")
+            estado = "descargado"
+
+        try:
+            filas = filas_parquet(destino)
+        except Exception as error:  # pyarrow lanza distintos tipos segun el dano
+            print(f"  {etiqueta}  ERROR: Parquet ilegible ({error})")
+            destino.unlink(missing_ok=True)
+            resumen["fallidos"].append(etiqueta)
+            continue
+
+        resumen["descargados" if estado == "descargado" else "omitidos"] += 1
+        resumen["manifiesto"].append({
+            "tipo": tipo, "mes": etiqueta, "archivo": destino.as_posix(),
+            "bytes": remoto, "filas": filas, "estado": estado,
+        })
 
     return resumen
+
+
+def escribir_manifiesto(filas: list, tipos: tuple) -> None:
+    """Reescribe el manifiesto conservando las filas de tipos no procesados."""
+    if MANIFIESTO.exists():
+        with MANIFIESTO.open(newline="") as archivo:
+            filas = [f for f in csv.DictReader(archivo) if f["tipo"] not in tipos] + filas
+    MANIFIESTO.parent.mkdir(parents=True, exist_ok=True)
+    with MANIFIESTO.open("w", newline="") as archivo:
+        escritor = csv.DictWriter(
+            archivo, fieldnames=["tipo", "mes", "archivo", "bytes", "filas", "estado"]
+        )
+        escritor.writeheader()
+        escritor.writerows(filas)
 
 
 def main() -> int:
@@ -149,12 +212,16 @@ def main() -> int:
     tipos = TIPOS_TAXI if argumentos.taxi == "all" else (argumentos.taxi,)
 
     total = {"descargados": 0, "omitidos": 0, "no_publicados": [], "fallidos": []}
+    manifiesto = []
     for tipo in tipos:
         resumen = descargar(tipo)
         total["descargados"] += resumen["descargados"]
         total["omitidos"] += resumen["omitidos"]
         total["no_publicados"] += [f"{tipo} {m}" for m in resumen["no_publicados"]]
         total["fallidos"] += [f"{tipo} {m}" for m in resumen["fallidos"]]
+        manifiesto += resumen["manifiesto"]
+
+    escribir_manifiesto(manifiesto, tipos)
 
     print("\n" + "=" * 60)
     print("RESUMEN")
@@ -167,6 +234,8 @@ def main() -> int:
     print(f"  fallidos      : {len(total['fallidos'])}")
     if total["fallidos"]:
         print(f"      {', '.join(total['fallidos'])}")
+    print(f"  filas totales : {sum(f['filas'] for f in manifiesto):,}")
+    print(f"  manifiesto    : {MANIFIESTO}")
     print("=" * 60)
 
     return 1 if total["fallidos"] else 0
