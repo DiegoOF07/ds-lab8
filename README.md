@@ -241,7 +241,20 @@ Pruebas realizadas dentro del contenedor:
 
 ## Como ejecutar el analisis
 
-<!-- TODO -->
+### Ejercicio 3: exploracion directa sobre Parquet
+
+Las consultas estan en `sql/ejercicio3/` (una por archivo). El notebook
+`notebooks/01_exploracion_parquet.ipynb` las ejecuta en orden. Puede abrirse en
+JupyterLab, o ejecutarse completo desde la terminal:
+
+```bash
+docker compose exec lab jupyter nbconvert --to notebook --execute --inplace \
+    notebooks/01_exploracion_parquet.ipynb
+```
+
+La documentacion de cada consulta (SQL, objetivo, fuentes, resultado y
+decisiones), los problemas de calidad encontrados y la explicacion de por que
+consultar Parquet directamente estan en [`docs/ejercicio3.md`](docs/ejercicio3.md).
 
 ## Como reproducir los benchmarks
 
