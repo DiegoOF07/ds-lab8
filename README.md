@@ -189,7 +189,55 @@ volumen `metabase-data`.
 
 ## Como descargar los datos
 
-<!-- TODO (Ejercicios 2.6, 5.1 y 8.1) -->
+<!-- TODO (Ejercicios 5.1 y 8.1) -->
+
+```bash
+docker compose exec lab python scripts/download_data.py                # yellow y green 2026
+docker compose exec lab python scripts/download_data.py --taxi green   # solo un tipo
+```
+
+Los archivos se guardan en `data/raw/<tipo>/2026/<tipo>_tripdata_2026-MM.parquet`.
+Al terminar, el script escribe `data/raw/manifest_2026.csv` con el tipo, mes,
+ruta, bytes, filas y estado de cada archivo. El script puede ejecutarse
+cuantas veces sea necesario: solo descarga lo que falta o esta incompleto.
+
+### Cambios realizados al script (2.6)
+
+El script original ya recorria los 12 meses, consultaba con `HEAD` que archivos
+estaban publicados y omitia los que existian localmente. Su limitacion era que
+consideraba valido cualquier archivo local de mas de 0 bytes, de modo que un
+archivo truncado o corrupto nunca se volvia a descargar. Los cambios son estos:
+
+| Cambio | Motivo |
+|---|---|
+| `esta_publicado()` se reemplazo por `tamanio_remoto()`, que devuelve el `Content-Length` del servidor o `None` si el mes no esta publicado (403) | conocer el tamano esperado de cada archivo |
+| Un archivo local se omite solo si su tamano coincide con el remoto. Si difiere, se reporta como incompleto y se descarga de nuevo | el punto 2.4 no se cumple si se conserva un archivo danado |
+| Sin conexion, un archivo local existente se conserva y no se marca como fallido | poder ejecutar el script sin red una vez descargados los datos |
+| `descargar_archivo()` verifica que los bytes escritos coincidan con el `Content-Length`; si no, reintenta | detectar descargas cortadas |
+| Cada archivo se valida leyendo su footer con `pyarrow.parquet.read_metadata`. Si no es legible se elimina y se reporta como fallido | asegurar que el archivo es un Parquet valido, no solo que pesa lo esperado |
+| Se genera `data/raw/manifest_2026.csv` y el resumen muestra el total de filas. Al ejecutarlo con `--taxi` se conservan las filas del otro tipo | dejar evidencia verificable de lo descargado |
+
+Pruebas realizadas dentro del contenedor:
+
+1. La primera ejecucion descargo 16 archivos (8 yellow y 8 green), con 30,040,469 filas.
+2. La segunda ejecucion descargo 0 archivos y omitio 16, porque ya existian.
+3. Se trunco `green_tripdata_2026-03.parquet` a 1000 bytes. El script lo
+   detecto como incompleto (`1000 de 1082530 bytes`) y lo volvio a descargar.
+
+### Como se determino que el conjunto esta completo (2.7)
+
+1. **Meses esperados.** La TLC publica con unos dos meses de atraso. Al
+   5 de octubre de 2026, el servidor responde 200 para enero a agosto y 403 para
+   septiembre a diciembre, en ambos tipos. El resumen del script lo confirma:
+   16 descargados o existentes, 8 no publicados y 0 fallidos.
+2. **Integridad de bytes.** Cada archivo local pesa exactamente lo que indica
+   el `Content-Length` del servidor.
+3. **Integridad del formato.** Los 16 footers Parquet se leyeron sin error, y
+   todos los archivos tienen filas (entre 37 mil y 44 mil en green, y entre
+   3.3 y 4.1 millones en yellow), sin meses vacios ni atipicamente pequenos.
+4. **Contraste independiente.** El conteo con DuckDB (`count(*)` sobre los
+   Parquet, consulta 03 del Ejercicio 3) da 30,040,469 filas, igual que el
+   manifiesto.
 
 ## Como ejecutar el analisis
 
