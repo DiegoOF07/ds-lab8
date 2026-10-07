@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
-"""Descarga los archivos Parquet de 2026 del NYC TLC Trip Record Data.
+"""Descarga los archivos Parquet del NYC TLC Trip Record Data.
 
 Descarga los registros de viajes de taxis amarillos (yellow) y verdes (green)
-correspondientes al anio 2026, que es el conjunto de datos inicial del
-laboratorio. Este script solo contempla el anio 2026.
+de los anios definidos en ANIOS (por defecto 2024 y 2026), o de los que se
+indiquen con --anio. Agregar un anio al laboratorio solo requiere agregarlo a
+ANIOS: los archivos ya descargados de otros anios no se tocan.
 
 Fuente oficial de los datos:
     https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
 
 Uso:
-    python scripts/download_data.py                 # amarillos y verdes
-    python scripts/download_data.py --taxi yellow
-    python scripts/download_data.py --taxi green
+    python scripts/download_data.py                      # todos los anios de ANIOS
+    python scripts/download_data.py --anio 2024          # un solo anio
+    python scripts/download_data.py --anio 2024 2026 --taxi green
 
 Los archivos se guardan en:
     data/raw/<tipo>/<anio>/<nombre-original>.parquet
 
 Comportamiento:
   - La TLC publica cada mes con varias semanas de atraso, por lo que no todos
-    los meses de 2026 existen todavia. El script consulta al servidor que
-    meses estan publicados en lugar de suponerlos.
+    los meses del anio en curso existen todavia. El script consulta al servidor
+    que meses estan publicados en lugar de suponerlos.
   - Un archivo que ya existe localmente no se vuelve a descargar, siempre que
     su tamanio coincida con el publicado (Content-Length). Si difiere se
     considera incompleto y se descarga de nuevo.
@@ -28,21 +29,26 @@ Comportamiento:
     cada archivo, que sirve para verificar que la descarga esta completa.
   - La descarga se hace sobre un nombre temporal y solo se renombra al
     terminar, de modo que una interrupcion no deja archivos .parquet a medias.
+  - Tambien descarga la tabla de zonas de la TLC (data/raw/taxi_zone_lookup.csv),
+    que traduce PULocationID/DOLocationID a borough y zona.
 """
 
 import argparse
 import csv
 import sys
+from datetime import date
 from pathlib import Path
 
 import pyarrow.parquet as pq
 import requests
 
-ANIO = 2026
+ANIOS = (2024, 2026)        # anios que forman parte del laboratorio
+PRIMER_ANIO_TLC = 2009      # primer anio publicado por la TLC
 TIPOS_TAXI = ("yellow", "green")
 URL_BASE = "https://d37ci6vzurychx.cloudfront.net/trip-data"
 DIR_DESTINO = Path("data/raw")
-MANIFIESTO = DIR_DESTINO / f"manifest_{ANIO}.csv"
+URL_ZONAS = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv"
+ARCHIVO_ZONAS = DIR_DESTINO / "taxi_zone_lookup.csv"
 
 TIEMPO_ESPERA = 60          # segundos por peticion
 INTENTOS = 3                # intentos por archivo antes de darse por vencido
@@ -50,19 +56,24 @@ BLOQUE = 1024 * 1024        # 1 MiB por bloque de descarga
 SUFIJO_TEMPORAL = ".part"
 
 
-def construir_nombre(tipo: str, mes: int) -> str:
+def construir_nombre(tipo: str, anio: int, mes: int) -> str:
     """Nombre del archivo publicado por la TLC, p. ej. yellow_tripdata_2026-01.parquet."""
-    return f"{tipo}_tripdata_{ANIO}-{mes:02d}.parquet"
+    return f"{tipo}_tripdata_{anio}-{mes:02d}.parquet"
 
 
-def construir_url(tipo: str, mes: int) -> str:
+def construir_url(tipo: str, anio: int, mes: int) -> str:
     """URL completa del archivo Parquet mensual."""
-    return f"{URL_BASE}/{construir_nombre(tipo, mes)}"
+    return f"{URL_BASE}/{construir_nombre(tipo, anio, mes)}"
 
 
-def ruta_destino(tipo: str, mes: int) -> Path:
+def ruta_destino(tipo: str, anio: int, mes: int) -> Path:
     """Ruta local donde se guarda el archivo."""
-    return DIR_DESTINO / tipo / str(ANIO) / construir_nombre(tipo, mes)
+    return DIR_DESTINO / tipo / str(anio) / construir_nombre(tipo, anio, mes)
+
+
+def ruta_manifiesto(anio: int) -> Path:
+    """Manifiesto con el detalle de los archivos de un anio."""
+    return DIR_DESTINO / f"manifest_{anio}.csv"
 
 
 class SinConexion(Exception):
@@ -124,16 +135,16 @@ def descargar_archivo(url: str, destino: Path, esperado: int) -> int:
     raise requests.RequestException(f"no se pudo descargar {url}: {ultimo_error}")
 
 
-def descargar(tipo: str) -> dict:
-    """Descarga todos los meses publicados de un tipo de taxi para 2026."""
-    print(f"\n=== {tipo.upper()} {ANIO} ===")
+def descargar(tipo: str, anio: int) -> dict:
+    """Descarga todos los meses publicados de un tipo de taxi para un anio."""
+    print(f"\n=== {tipo.upper()} {anio} ===")
     resumen = {"descargados": 0, "omitidos": 0, "no_publicados": [],
                "fallidos": [], "manifiesto": []}
 
     for mes in range(1, 13):
-        etiqueta = f"{ANIO}-{mes:02d}"
-        destino = ruta_destino(tipo, mes)
-        url = construir_url(tipo, mes)
+        etiqueta = f"{anio}-{mes:02d}"
+        destino = ruta_destino(tipo, anio, mes)
+        url = construir_url(tipo, anio, mes)
         local = destino.stat().st_size if destino.exists() else 0
 
         try:
@@ -185,43 +196,86 @@ def descargar(tipo: str) -> dict:
     return resumen
 
 
-def escribir_manifiesto(filas: list, tipos: tuple) -> None:
-    """Reescribe el manifiesto conservando las filas de tipos no procesados."""
-    if MANIFIESTO.exists():
-        with MANIFIESTO.open(newline="") as archivo:
+def descargar_zonas() -> bool:
+    """Descarga la tabla de zonas si no existe localmente.
+
+    El servidor la entrega comprimida (gzip) y sin Content-Length, asi que no
+    se compara el tamanio: se valida que el CSV tenga el encabezado esperado.
+    """
+    print("\n=== ZONAS (taxi_zone_lookup.csv) ===")
+    if ARCHIVO_ZONAS.exists():
+        print("  ya existe, se omite")
+        return True
+    try:
+        respuesta = requests.get(URL_ZONAS, timeout=TIEMPO_ESPERA)
+        respuesta.raise_for_status()
+    except requests.RequestException as error:
+        print(f"  ERROR: {error}")
+        return False
+    if not respuesta.text.startswith('"LocationID","Borough","Zone","service_zone"'):
+        print("  ERROR: el archivo no tiene el encabezado esperado")
+        return False
+    ARCHIVO_ZONAS.parent.mkdir(parents=True, exist_ok=True)
+    ARCHIVO_ZONAS.write_bytes(respuesta.content)
+    filas = respuesta.text.count("\n") - 1
+    print(f"  listo ({filas} zonas) -> {ARCHIVO_ZONAS}")
+    return True
+
+
+def escribir_manifiesto(filas: list, tipos: tuple, anio: int) -> Path:
+    """Reescribe el manifiesto del anio conservando las filas de tipos no procesados."""
+    manifiesto = ruta_manifiesto(anio)
+    if manifiesto.exists():
+        with manifiesto.open(newline="") as archivo:
             filas = [f for f in csv.DictReader(archivo) if f["tipo"] not in tipos] + filas
-    MANIFIESTO.parent.mkdir(parents=True, exist_ok=True)
-    with MANIFIESTO.open("w", newline="") as archivo:
+    manifiesto.parent.mkdir(parents=True, exist_ok=True)
+    with manifiesto.open("w", newline="") as archivo:
         escritor = csv.DictWriter(
             archivo, fieldnames=["tipo", "mes", "archivo", "bytes", "filas", "estado"]
         )
         escritor.writeheader()
         escritor.writerows(filas)
+    return manifiesto
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description=f"Descarga los datos de taxis de {ANIO} del NYC TLC."
+        description="Descarga los datos de taxis yellow y green del NYC TLC."
     )
     parser.add_argument(
         "--taxi", choices=(*TIPOS_TAXI, "all"), default="all",
         help="tipo de taxi a descargar (por defecto: all)",
     )
+    parser.add_argument(
+        "--anio", type=int, nargs="+", default=list(ANIOS),
+        help=f"anios a descargar (por defecto: {' '.join(map(str, ANIOS))})",
+    )
     argumentos = parser.parse_args()
 
     tipos = TIPOS_TAXI if argumentos.taxi == "all" else (argumentos.taxi,)
+    anios = sorted(set(argumentos.anio))
+    anio_actual = date.today().year
+    invalidos = [a for a in anios if not PRIMER_ANIO_TLC <= a <= anio_actual]
+    if invalidos:
+        parser.error(f"anio fuera de rango ({PRIMER_ANIO_TLC}-{anio_actual}): {invalidos}")
 
     total = {"descargados": 0, "omitidos": 0, "no_publicados": [], "fallidos": []}
-    manifiesto = []
-    for tipo in tipos:
-        resumen = descargar(tipo)
-        total["descargados"] += resumen["descargados"]
-        total["omitidos"] += resumen["omitidos"]
-        total["no_publicados"] += [f"{tipo} {m}" for m in resumen["no_publicados"]]
-        total["fallidos"] += [f"{tipo} {m}" for m in resumen["fallidos"]]
-        manifiesto += resumen["manifiesto"]
+    filas_por_anio = {}
+    manifiestos = []
+    for anio in anios:
+        manifiesto = []
+        for tipo in tipos:
+            resumen = descargar(tipo, anio)
+            total["descargados"] += resumen["descargados"]
+            total["omitidos"] += resumen["omitidos"]
+            total["no_publicados"] += [f"{tipo} {m}" for m in resumen["no_publicados"]]
+            total["fallidos"] += [f"{tipo} {m}" for m in resumen["fallidos"]]
+            manifiesto += resumen["manifiesto"]
+        manifiestos.append(escribir_manifiesto(manifiesto, tipos, anio))
+        filas_por_anio[anio] = sum(f["filas"] for f in manifiesto)
 
-    escribir_manifiesto(manifiesto, tipos)
+    if not descargar_zonas():
+        total["fallidos"].append("taxi_zone_lookup.csv")
 
     print("\n" + "=" * 60)
     print("RESUMEN")
@@ -234,8 +288,10 @@ def main() -> int:
     print(f"  fallidos      : {len(total['fallidos'])}")
     if total["fallidos"]:
         print(f"      {', '.join(total['fallidos'])}")
-    print(f"  filas totales : {sum(f['filas'] for f in manifiesto):,}")
-    print(f"  manifiesto    : {MANIFIESTO}")
+    for anio, filas in filas_por_anio.items():
+        print(f"  filas {anio}    : {filas:,}")
+    print(f"  filas totales : {sum(filas_por_anio.values()):,}")
+    print(f"  manifiestos   : {', '.join(m.as_posix() for m in manifiestos)}")
     print("=" * 60)
 
     return 1 if total["fallidos"] else 0
