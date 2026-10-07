@@ -189,17 +189,30 @@ volumen `metabase-data`.
 
 ## Como descargar los datos
 
-<!-- TODO (Ejercicios 5.1 y 8.1) -->
+<!-- TODO (Ejercicio 8.1) -->
 
 ```bash
-docker compose exec lab python scripts/download_data.py                # yellow y green 2026
-docker compose exec lab python scripts/download_data.py --taxi green   # solo un tipo
+docker compose exec lab python scripts/download_data.py                     # yellow y green de 2024 y 2026
+docker compose exec lab python scripts/download_data.py --anio 2024         # un solo anio
+docker compose exec lab python scripts/download_data.py --taxi green        # solo un tipo
 ```
 
-Los archivos se guardan en `data/raw/<tipo>/2026/<tipo>_tripdata_2026-MM.parquet`.
-Al terminar, el script escribe `data/raw/manifest_2026.csv` con el tipo, mes,
-ruta, bytes, filas y estado de cada archivo. El script puede ejecutarse
-cuantas veces sea necesario: solo descarga lo que falta o esta incompleto.
+Los anios del laboratorio estan en la constante `ANIOS` del script (2024 y
+2026 desde el Ejercicio 5); `--anio` permite descargar otros. Los archivos se
+guardan en `data/raw/<tipo>/<anio>/<tipo>_tripdata_<anio>-MM.parquet` y, al
+terminar, el script escribe un manifiesto por anio (`data/raw/manifest_<anio>.csv`)
+con el tipo, mes, ruta, bytes, filas y estado de cada archivo. El script puede
+ejecutarse cuantas veces sea necesario: solo descarga lo que falta o esta
+incompleto, y no toca los archivos de otros anios.
+
+Con 2024 y 2026 se descargan 40 archivos (unos 1.2 GB) con 71,870,407 filas.
+Los cambios del Ejercicio 5 y la verificacion de la incorporacion de 2024 estan
+en [`docs/ejercicio5.md`](docs/ejercicio5.md).
+
+El script tambien descarga la tabla de zonas de la TLC en
+`data/raw/taxi_zone_lookup.csv` (265 zonas con borough y `service_zone`), que
+usa el analisis del Ejercicio 4. Si el archivo ya existe, no se vuelve a
+descargar.
 
 ### Cambios realizados al script (2.6)
 
@@ -256,9 +269,69 @@ La documentacion de cada consulta (SQL, objetivo, fuentes, resultado y
 decisiones), los problemas de calidad encontrados y la explicacion de por que
 consultar Parquet directamente estan en [`docs/ejercicio3.md`](docs/ejercicio3.md).
 
+### Ejercicio 4: analisis exploratorio
+
+Las consultas estan en `sql/ejercicio4/`. `00_vistas.sql` crea las vistas
+`viajes`, `viajes_validos` y `zonas`, con las reglas de calidad del Ejercicio 3,
+y las consultas `01` a `17` las reutilizan. El notebook
+`notebooks/02_analisis_exploratorio.ipynb` crea las vistas, ejecuta las
+consultas en orden y genera las graficas. Requiere la tabla de zonas, que
+descarga `scripts/download_data.py`.
+
+```bash
+docker compose exec lab jupyter nbconvert --to notebook --execute --inplace \
+    notebooks/02_analisis_exploratorio.ipynb
+```
+
+Las preguntas planteadas, la documentacion de cada consulta, la interpretacion
+de los resultados y los hallazgos estan en [`docs/ejercicio4.md`](docs/ejercicio4.md).
+
+`00_vistas.sql` tambien limita los archivos temporales de DuckDB a 4 GB y los
+dirige a `data/processed/duckdb_tmp/`. Sin ese limite, una consulta que no cabe
+en memoria puede llenar el disco virtual de Docker.
+
+### Ejercicio 5: incorporacion de 2024
+
+Las consultas de validacion estan en `sql/ejercicio5/`. El notebook
+`notebooks/03_incorporacion_2024.ipynb` verifica los archivos de 2024, consulta
+2024 y 2026 de forma conjunta y vuelve a ejecutar todas las consultas de los
+Ejercicios 3 y 4 sobre el conjunto ampliado (tarda unos 13 minutos).
+
+```bash
+docker compose exec lab jupyter nbconvert --to notebook --execute --inplace \
+    notebooks/03_incorporacion_2024.ipynb
+```
+
+La documentacion esta en [`docs/ejercicio5.md`](docs/ejercicio5.md).
+
 ## Como reproducir los benchmarks
 
-<!-- TODO (Ejercicio 6) -->
+El benchmark del Ejercicio 6 compara las mismas consultas sobre los Parquet y
+sobre tablas materializadas en DuckDB, en tres escalas (un mes, 2026 y todos
+los anios descargados). Requiere haber descargado los datos.
+
+```bash
+# 1. Materializa las tablas que falten y mide las consultas (unos 10 minutos)
+docker compose exec lab python scripts/benchmark.py
+
+# 2. Genera las tablas y graficas de resultados
+docker compose exec lab jupyter nbconvert --to notebook --execute --inplace \
+    notebooks/04_benchmark_parquet_vs_duckdb.ipynb
+```
+
+- Las tablas se guardan en `data/processed/taxis.duckdb` (unos 2.8 GB, no se
+  versiona): `viajes` (todos los anios), `viajes_2026`, `viajes_2026_01` y
+  `zonas`. Si se descargan anios nuevos, `--recrear` vuelve a crearlas.
+- Los tiempos se escriben en `docs/ejercicio6_benchmark.csv` y el costo de
+  materializar en `docs/ejercicio6_materializacion.csv`. Ambos se versionan
+  como evidencia.
+- El script verifica que cada consulta devuelva el mismo resultado con ambas
+  estrategias.
+- Las consultas estan en `sql/ejercicio6/`. El diseno, los resultados y su
+  analisis estan en [`docs/ejercicio6.md`](docs/ejercicio6.md).
+
+Para conectar otra herramienta (por ejemplo Metabase) a `taxis.duckdb`, use el
+modo de solo lectura, como indica la nota sobre DuckDB al inicio de este README.
 
 ## Como generar los resultados principales
 
