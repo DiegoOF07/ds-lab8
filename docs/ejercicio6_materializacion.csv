@@ -1,0 +1,4 @@
+escala,tabla,filas,segundos_creacion,mib_parquet,mib_tabla_duckdb
+1 mes (2026-01),viajes_2026_01,3765161,4.34,62.1,102.0
+2026 (8 meses),viajes_2026,30040469,33.64,495.7,815.5
+todos los anios,viajes,71870407,81.35,1171.7,1934.2
