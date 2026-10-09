@@ -2,7 +2,7 @@
 """Descarga los archivos Parquet del NYC TLC Trip Record Data.
 
 Descarga los registros de viajes de taxis amarillos (yellow) y verdes (green)
-de los anios definidos en ANIOS (por defecto 2024 y 2026), o de los que se
+de los anios definidos en ANIOS (por defecto 2024, 2025 y 2026), o de los que se
 indiquen con --anio. Agregar un anio al laboratorio solo requiere agregarlo a
 ANIOS: los archivos ya descargados de otros anios no se tocan.
 
@@ -42,7 +42,7 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import requests
 
-ANIOS = (2024, 2026)        # anios que forman parte del laboratorio
+ANIOS = (2024, 2025, 2026)  # anios que forman parte del laboratorio
 PRIMER_ANIO_TLC = 2009      # primer anio publicado por la TLC
 TIPOS_TAXI = ("yellow", "green")
 URL_BASE = "https://d37ci6vzurychx.cloudfront.net/trip-data"

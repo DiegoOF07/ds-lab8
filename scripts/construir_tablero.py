@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Construye la base del tablero del Ejercicio 7 (data/processed/tablero.duckdb).
+"""Construye la base del tablero de los Ejercicios 7 y 8 (data/processed/tablero.duckdb).
 
 Crea las vistas del Ejercicio 4, materializa las tablas de
 sql/ejercicio7/00_construir_tablas.sql, verifica que las filas cuadren con el
-control de calidad y ejecuta cada indicador (sql/ejercicio7/i*.sql).
+control de calidad y ejecuta cada indicador (sql/ejercicio7/i*.sql y
+sql/ejercicio8/i*.sql).
 
 La base se escribe en un archivo temporal que luego reemplaza a la anterior.
 Metabase sigue leyendo la versión anterior hasta que se reinicia
@@ -18,6 +19,7 @@ from pathlib import Path
 import duckdb
 
 DIR_SQL = Path("sql/ejercicio7")
+INDICADORES = sorted(Path("sql").glob("ejercicio[78]/i*.sql"))
 VISTAS = Path("sql/ejercicio4/00_vistas.sql")
 BASE_DATOS = Path("data/processed/tablero.duckdb")
 TEMPORAL = BASE_DATOS.with_name(BASE_DATOS.name + ".tmp")
@@ -65,7 +67,7 @@ def probar_indicadores() -> None:
     con = duckdb.connect(str(BASE_DATOS), read_only=True)
     con.execute("SET enable_progress_bar = false")
     print()
-    for archivo in sorted(DIR_SQL.glob("i*.sql")):
+    for archivo in INDICADORES:
         inicio = time.perf_counter()
         filas = len(con.sql(archivo.read_text()).fetchall())
         print(f"  {archivo.stem:<32} {filas:>5} filas  {time.perf_counter() - inicio:6.2f} s")

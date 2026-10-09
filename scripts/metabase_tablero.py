@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Crea o actualiza el tablero del Ejercicio 7 en Metabase mediante su API.
+"""Crea o actualiza el tablero de los Ejercicios 7 y 8 en Metabase mediante su API.
 
 Cada indicador es una pregunta SQL nativa cuyo texto es el archivo
-sql/ejercicio7/i*.sql correspondiente. El script hace la configuración inicial
+sql/ejercicio7/i*.sql o sql/ejercicio8/i*.sql correspondiente. El script hace la configuración inicial
 de Metabase si falta, registra data/processed/tablero.duckdb en solo lectura y
 crea o actualiza las preguntas y el tablero. Volver a ejecutarlo no duplica nada.
 
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import requests
 
-DIR_SQL = Path("sql/ejercicio7")
+DIR_SQL = Path("sql")
 NOMBRE_BASE = "Taxis NYC (tablero)"
 NOMBRE_COLECCION = "Lab 8 - Indicadores"
 NOMBRE_TABLERO = "Taxis de Nueva York: indicadores"
@@ -73,22 +73,24 @@ def columnas(titulos: dict) -> dict:
 
 # ancho y alto usan la cuadrícula de 24 columnas de Metabase.
 INDICADORES = [
-    {"archivo": "i01_resumen_anual", "display": "table", "ancho": 24, "alto": 4,
+    {"archivo": "i01_resumen_anual", "display": "table", "ancho": 24, "alto": 5,
      "titulo": "I1. Resumen por tipo y año (meses comunes)",
      "visualizacion": columnas({
          "tipo": "Tipo", "anio": "Año", "meses": "Meses", "viajes_por_dia": "Viajes por día",
          "ingresos_por_dia_miles_usd": "Ingresos por día (miles USD)",
          "total_mediano_usd": "Total mediano (USD)", "distancia_mediana_mi": "Distancia mediana (mi)",
          "duracion_mediana_min": "Duración mediana (min)"}),
-     "interpretacion": "Yellow sube 12.6% en viajes por día y green baja 22.3%."},
+     "interpretacion": "Yellow llega a su máximo en 2025 (+18% sobre 2024) y baja 5% en 2026. "
+                       "Green cae todos los años (-10% y -14%)."},
     {"archivo": "i02a_demanda_yellow", "display": "line", "ancho": 12, "alto": 7,
      "titulo": "I2a. Viajes por día en cada mes, taxis amarillos",
      "visualizacion": linea("mes", "viajes_por_dia", "anio", "mes", "viajes por día", series(COLOR_ANIO)),
-     "interpretacion": "2026 supera a 2024 en todos los meses (+8% a +24%). Misma estacionalidad."},
+     "interpretacion": "2025 supera a 2024 en todos los meses. 2026 queda por debajo de 2025 de "
+                       "febrero a agosto (2% a 10%). Misma estacionalidad."},
     {"archivo": "i02b_demanda_green", "display": "line", "ancho": 12, "alto": 7,
      "titulo": "I2b. Viajes por día en cada mes, taxis verdes",
      "visualizacion": linea("mes", "viajes_por_dia", "anio", "mes", "viajes por día", series(COLOR_ANIO)),
-     "interpretacion": "2026 queda por debajo de 2024 en todos los meses (-18% a -27%)."},
+     "interpretacion": "Cada año queda por debajo del anterior en todos los meses."},
     {"archivo": "i03_perfil_horario", "display": "line", "ancho": 12, "alto": 7,
      "titulo": "I3. Perfil horario de la demanda (% de viajes por hora)",
      "visualizacion": linea("hora", "pct_viajes", "serie", "hora de inicio", "% de viajes", {
@@ -102,66 +104,81 @@ INDICADORES = [
      "titulo": "I4. Velocidad mediana por hora en el centro de Manhattan (yellow, días laborales)",
      "visualizacion": linea("hora", "velocidad_mediana_mph", "anio", "hora de inicio", "mph",
                             series(COLOR_ANIO)),
-     "interpretacion": "De día se circula a unas 7 mph. 2026 es entre 1% y 7% más lento que 2024 "
-                       "en todas las horas, pese al cargo por congestión de 2025."},
+     "interpretacion": "De día se circula a unas 7 mph. 2025 es igual a 2024 (±2%) pese al cargo "
+                       "por congestión; 2026 es más lento en todas las horas."},
     {"archivo": "i05_costo_viaje", "display": "bar", "ancho": 12, "alto": 7,
      "titulo": "I5. Total mediano por viaje según el canal (USD)",
      "visualizacion": barras_por_categoria("canal", "total_mediano_usd", "USD",
                                            {"Taxímetro": AZUL, "Aplicación": NARANJA}, apiladas=False),
-     "interpretacion": "En yellow, la aplicación pasa de costar 6% más que el taxímetro a 32% más."},
+     "interpretacion": "En yellow, la aplicación cuesta 6% más que el taxímetro en 2024 y 2025, "
+                       "y 32% más en 2026."},
     {"archivo": "i06_formas_pago", "display": "bar", "ancho": 12, "alto": 7,
      "titulo": "I6. Formas de pago (% de viajes)",
      "visualizacion": barras_por_categoria("forma", "pct_viajes", "% de viajes", {
          "Tarjeta": AZUL, "Efectivo": NARANJA, "Aplicación": AGUA, "Otros": VIOLETA}),
-     "interpretacion": "La aplicación pasa de 9% a 25% en yellow y de 4% a 15% en green. "
-                       "El efectivo cae en ambos."},
+     "interpretacion": "La aplicación en yellow salta de 9% a 22% en 2025 y llega a 25% en 2026. "
+                       "En green crece después: 4%, 7% y 15%."},
     {"archivo": "i07_propinas", "display": "bar", "ancho": 12, "alto": 7,
      "titulo": "I7. Propina sobre la tarifa, pagos con tarjeta (% de viajes)",
      "visualizacion": barras_por_categoria("tramo", "pct_viajes", "% de viajes con tarjeta", dict(zip(
          ["1. sin propina", "2. menos de 20%", "3. 20% a 25%", "4. 25% a 30%", "5. 30% o más"],
          [GRIS] + RAMPA_AZUL))),
-     "interpretacion": "Más del 70% deja 20% o más. En yellow crecen a la vez las propinas de 30% "
-                       "o más y los viajes sin propina."},
+     "interpretacion": "Más del 70% deja 20% o más. En yellow, el 30% o más sube en 2025 y los "
+                       "viajes sin propina crecen cada año."},
     {"archivo": "i08_aeropuertos", "display": "bar", "ancho": 12, "alto": 7,
      "titulo": "I8. Peso de los viajes de aeropuerto (%)",
      "visualizacion": barras({"pct_viajes": ("% de viajes", AZUL),
                               "pct_ingresos": ("% de ingresos", NARANJA)}, "%"),
-     "interpretacion": "En yellow bajan de 10% a 8% de los viajes y de 28% a 21% de los ingresos."},
+     "interpretacion": "Su peso en los ingresos de yellow baja cada año: 28%, 25% y 21%."},
     {"archivo": "i09_zona_origen", "display": "bar", "ancho": 24, "alto": 7,
      "titulo": "I9. Zona de origen de los viajes (% de viajes)",
      "visualizacion": barras_por_categoria("origen", "pct_viajes", "% de viajes", {
          "Manhattan centro (Yellow Zone)": AZUL, "Alto Manhattan": NARANJA, "Brooklyn": AGUA,
          "Queens": VIOLETA, "Resto": ROJO}),
      "interpretacion": "Los mercados siguen separados, pero yellow duplica su peso fuera del "
-                       "centro (de 4.6% a 9.4%)."},
+                       "centro en 2025 (de 4.6% a 9.1%) y lo mantiene en 2026."},
+    {"archivo": "i11_aplicacion_mensual", "display": "line", "ancho": 12, "alto": 7,
+     "titulo": "I11. Viajes por aplicación (% por mes)",
+     "visualizacion": {"graph.dimensions": ["mes", "tipo"], "graph.metrics": ["pct_aplicacion"],
+                       "graph.x_axis.title_text": "", "graph.y_axis.title_text": "% de viajes",
+                       "series_settings": series({"yellow": AMARILLO, "green": VERDE})},
+     "interpretacion": "En yellow salta en enero y febrero de 2025 (de 8% a 22%) y queda entre 18% "
+                       "y 29%. En green crece desde junio de 2025 hasta 15%."},
+    {"archivo": "i12_velocidad_mensual", "display": "line", "ancho": 12, "alto": 7,
+     "titulo": "I12. Velocidad mediana por mes en el centro de Manhattan (yellow, días laborales, 5 a 21 h)",
+     "visualizacion": {"graph.dimensions": ["mes"], "graph.metrics": ["velocidad_mediana_mph"],
+                       "graph.x_axis.title_text": "", "graph.y_axis.title_text": "mph",
+                       "series_settings": {"velocidad_mediana_mph": {"color": AZUL, "title": "mph"}}},
+     "interpretacion": "Sin salto en enero de 2025: cada mes de 2025 queda a menos de 2.5% del "
+                       "mismo mes de 2024. 2026 es entre 4% y 12% más lento que 2025."},
     {"archivo": "i10_calidad_mensual", "display": "line", "ancho": 24, "alto": 6,
      "titulo": "I10. Registros excluidos por las reglas de calidad (% por mes)",
      "visualizacion": {"graph.dimensions": ["mes", "tipo"], "graph.metrics": ["pct_excluidos"],
                        "graph.x_axis.title_text": "", "graph.y_axis.title_text": "% excluidos",
-                       "series_settings": series({"yellow": AMARILLO, "green": VERDE}),
-                       "line.missing": "none"},    # hueco en los meses sin datos (2025)
-     "interpretacion": "Entre 2.8% y 6.1% por mes, sin saltos que invaliden la comparación."},
+                       "series_settings": series({"yellow": AMARILLO, "green": VERDE})},
+     "interpretacion": "Entre 2.4% y 6.4% por mes, sin saltos que invaliden la comparación."},
 ]
 
 ENCABEZADO = """# Taxis de Nueva York: indicadores
 
 Viajes válidos de taxis amarillos (yellow) y verdes (green) de la TLC, desde `data/processed/tablero.duckdb`.
-Cada tarjeta es una consulta de `sql/ejercicio7/`; su interpretación está en el ícono de información y en `docs/ejercicio7.md`."""
+Cada tarjeta es una consulta de `sql/ejercicio7/` o `sql/ejercicio8/`; su interpretación está en el ícono de información y en `docs/`."""
 
 SECCIONES = {
     "i01_resumen_anual": "## Tamaño de cada servicio",
     "i02a_demanda_yellow": "## Cuándo se viaja",
     "i05_costo_viaje": "## Precio, pago e ingresos",
     "i09_zona_origen": "## Dónde se viaja",
+    "i11_aplicacion_mensual": "## Evolución mensual",
     "i10_calidad_mensual": "## Calidad de los datos",
 }
 
 HALLAZGOS = """## Hallazgos
 
-1. Yellow crece 12.6% y green cae 22.3% en viajes por día (I1, I2).
-2. La aplicación ya es un cuarto de yellow (I6) y cuesta 32% más que el taxímetro (I5).
-3. Yellow duplica su peso fuera del centro de Manhattan (I9) y pierde peso en aeropuertos (I8).
-4. En el centro de Manhattan, 2026 es más lento que 2024 en todas las horas (I4).
+1. Yellow llega a su máximo en 2025 y baja 5% en 2026; green cae todos los años (I1, I2).
+2. En 2025 la aplicación salta de 9% a 22% de yellow, a la vez que yellow duplica su peso fuera del centro (I6, I9, I11).
+3. El sobreprecio de la aplicación llega después: 6% en 2024 y 2025, 32% en 2026 (I5).
+4. El cargo por congestión no mejora la velocidad: 2025 es igual a 2024 y 2026 más lento (I4, I12).
 5. Green atiende traslados al trabajo; yellow, además, la vida nocturna (I3)."""
 
 
@@ -242,7 +259,7 @@ def guardar_preguntas(mb: Metabase, id_base: int, id_coleccion: int) -> dict:
     existentes = items(mb, id_coleccion, "card")
     ids = {}
     for ind in INDICADORES:
-        sql = (DIR_SQL / f"{ind['archivo']}.sql").read_text()
+        sql = next(DIR_SQL.glob(f"ejercicio*/{ind['archivo']}.sql")).read_text()
         pregunta = {
             "name": ind["titulo"],
             "description": f"{pregunta_del_sql(sql)} {ind['interpretacion']}",
@@ -299,7 +316,7 @@ def disponer_tarjetas(ids: dict) -> list:
                          "visualization_settings": {}})
         col, alto_fila = col + ind["ancho"], ind["alto"]
     fila += alto_fila
-    texto(HALLAZGOS, 4)
+    texto(HALLAZGOS, 5)
     return tarjetas
 
 
@@ -309,13 +326,13 @@ def guardar_tablero(mb: Metabase, id_coleccion: int, ids: dict) -> int:
         id_tablero = mb.llamar("POST", "dashboard", json={
             "name": NOMBRE_TABLERO, "collection_id": id_coleccion})["id"]
     mb.llamar("PUT", f"dashboard/{id_tablero}", json={
-        "description": "Indicadores del Ejercicio 7 (CC3084 Lab 8). Consultas en sql/ejercicio7/.",
+        "description": "Indicadores de los Ejercicios 7 y 8 (CC3084 Lab 8). Consultas en sql/ejercicio7/ y sql/ejercicio8/.",
         "width": "full", "dashcards": disponer_tarjetas(ids)})
     return id_tablero
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Crea el tablero del Ejercicio 7 en Metabase.")
+    parser = argparse.ArgumentParser(description="Crea el tablero de los Ejercicios 7 y 8 en Metabase.")
     parser.add_argument("--url", default="http://metabase:3000", help="URL de Metabase")
     parser.add_argument("--ruta-base", default="/workspace/data/processed/tablero.duckdb",
                         help="ruta de tablero.duckdb vista desde el contenedor de Metabase")

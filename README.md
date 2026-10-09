@@ -189,25 +189,23 @@ volumen `metabase-data`.
 
 ## Como descargar los datos
 
-<!-- TODO (Ejercicio 8.1) -->
-
 ```bash
-docker compose exec lab python scripts/download_data.py                     # yellow y green de 2024 y 2026
+docker compose exec lab python scripts/download_data.py                     # yellow y green de 2024, 2025 y 2026
 docker compose exec lab python scripts/download_data.py --anio 2024         # un solo anio
 docker compose exec lab python scripts/download_data.py --taxi green        # solo un tipo
 ```
 
-Los anios del laboratorio estan en la constante `ANIOS` del script (2024 y
-2026 desde el Ejercicio 5); `--anio` permite descargar otros. Los archivos se
+Los anios del laboratorio estan en la constante `ANIOS` del script (2024, 2025
+y 2026 desde el Ejercicio 8); `--anio` permite descargar otros. Los archivos se
 guardan en `data/raw/<tipo>/<anio>/<tipo>_tripdata_<anio>-MM.parquet` y, al
 terminar, el script escribe un manifiesto por anio (`data/raw/manifest_<anio>.csv`)
 con el tipo, mes, ruta, bytes, filas y estado de cada archivo. El script puede
 ejecutarse cuantas veces sea necesario: solo descarga lo que falta o esta
 incompleto, y no toca los archivos de otros anios.
 
-Con 2024 y 2026 se descargan 40 archivos (unos 1.2 GB) con 71,870,407 filas.
-Los cambios del Ejercicio 5 y la verificacion de la incorporacion de 2024 estan
-en [`docs/ejercicio5.md`](docs/ejercicio5.md).
+Con los tres años se descargan 64 archivos (unos 2 GB) con 121,184,384 filas.
+La incorporación de 2024 está en [`docs/ejercicio5.md`](docs/ejercicio5.md) y la
+de 2025 en [`docs/ejercicio8.md`](docs/ejercicio8.md).
 
 El script tambien descarga la tabla de zonas de la TLC en
 `data/raw/taxi_zone_lookup.csv` (265 zonas con borough y `service_zone`), que
@@ -350,3 +348,16 @@ Metabase no está configurado, crea el administrador `lab8@example.com` /
 (`docker compose restart metabase`). Los resultados están en
 `notebooks/05_indicadores.ipynb` y la documentación en
 [`docs/ejercicio7.md`](docs/ejercicio7.md).
+
+### Ejercicio 8: incorporación de 2025
+
+Con 2025 descargado, se reconstruye la base, se reinicia Metabase y se actualiza
+el tablero con los mismos comandos del Ejercicio 7. La validación de 2025, la
+prueba de las consultas anteriores y la evolución de los indicadores están en:
+
+```bash
+docker compose exec lab jupyter nbconvert --to notebook --execute --inplace \
+    notebooks/06_incorporacion_2025.ipynb
+```
+
+La documentación está en [`docs/ejercicio8.md`](docs/ejercicio8.md).

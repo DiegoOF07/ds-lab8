@@ -3,7 +3,24 @@
 -- (ver scripts/construir_tablero.py). Se materializa porque el tablero repite las
 -- mismas consultas (Ej. 6, 6.10).
 
--- viajes: viajes válidos según las reglas del Ej. 4, solo con las columnas que usan los indicadores.
+-- clasificados: cada registro con su decisión de calidad, compartida por viajes y calidad_mensual.
+-- Reglas del Ej. 4 más dos ajustes:
+--   velocidad de más de 80 mph = error de captura (Ej. 4, P15);
+--   Flex Fare con tarifa negativa = viaje real con montos mal capturados (Ej. 8): se
+--   conserva con los montos en NULL, como la duración de Helix (Ej. 4, P16).
+CREATE OR REPLACE TEMP VIEW clasificados AS
+WITH r AS (
+    SELECT *,
+           coalesce(payment_type = 0 AND fare_amount < 0, false) AS flex_sin_monto,
+           coalesce(duracion_min >= 1 AND trip_distance / (duracion_min / 60) > 80, false) AS velocidad_imposible
+    FROM viajes
+)
+SELECT *,
+       coalesce(ok_fecha AND ok_duracion AND ok_distancia AND (ok_monto OR flex_sin_monto), false)
+           AND NOT velocidad_imposible AS valido
+FROM r;
+
+-- viajes: viajes válidos, solo con las columnas que usan los indicadores.
 CREATE OR REPLACE TABLE t.viajes AS
 SELECT tipo,
        anio::SMALLINT AS anio,
@@ -20,14 +37,11 @@ SELECT tipo,
        CASE WHEN duracion_min >= 1 THEN round(trip_distance / (duracion_min / 60), 2) END AS velocidad_mph,
        payment_type::SMALLINT AS payment_type,
        forma_pago,
-       fare_amount AS tarifa,
-       tip_amount AS propina,
-       total_amount AS total
-FROM viajes_validos
--- Regla nueva: más de 80 mph es un error de captura (Ej. 4, P15)
-WHERE duracion_min IS NULL
-   OR duracion_min < 1
-   OR trip_distance / (duracion_min / 60) <= 80;
+       CASE WHEN NOT flex_sin_monto THEN fare_amount END AS tarifa,
+       CASE WHEN NOT flex_sin_monto THEN tip_amount END AS propina,
+       CASE WHEN NOT flex_sin_monto THEN total_amount END AS total
+FROM clasificados
+WHERE valido;
 
 -- viajes_comparables: solo los meses presentes en todos los años, para comparar años
 -- sin mezclar estacionalidad con tendencia (mismo criterio que Ej. 5, consulta 06).
@@ -56,12 +70,9 @@ SELECT tipo,
        count(*) FILTER (WHERE NOT ok_fecha) AS fecha_fuera_del_mes,
        count(*) FILTER (WHERE NOT ok_duracion) AS duracion_invalida,
        count(*) FILTER (WHERE NOT ok_distancia) AS distancia_invalida,
-       count(*) FILTER (WHERE NOT ok_monto) AS monto_negativo,
-       count(*) FILTER (WHERE ok_fecha AND ok_duracion AND ok_distancia AND ok_monto
-                          AND duracion_min >= 1 AND trip_distance / (duracion_min / 60) > 80)
-           AS velocidad_imposible,
-       count(*) FILTER (WHERE NOT (ok_fecha AND ok_duracion AND ok_distancia AND ok_monto)
-                          OR (duracion_min >= 1 AND trip_distance / (duracion_min / 60) > 80))
-           AS excluidos
-FROM viajes
+       count(*) FILTER (WHERE NOT ok_monto AND NOT flex_sin_monto) AS monto_negativo,
+       count(*) FILTER (WHERE velocidad_imposible) AS velocidad_imposible,
+       count(*) FILTER (WHERE valido AND flex_sin_monto) AS conservados_sin_monto,
+       count(*) FILTER (WHERE NOT valido) AS excluidos
+FROM clasificados
 GROUP BY ALL;

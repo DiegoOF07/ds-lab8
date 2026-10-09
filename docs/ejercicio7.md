@@ -14,7 +14,8 @@ interpretación.
 | `docs/ejercicio7_tablero.png` | captura del tablero |
 
 Datos: 2024 completo y enero a agosto de 2026, yellow y green (71,870,407
-registros).
+registros). Los resultados son anteriores al ajuste de la regla de montos del
+Ejercicio 8; las cifras con los tres años están en `docs/ejercicio8.md`.
 
 ## Cómo ejecutar
 
