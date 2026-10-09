@@ -335,4 +335,18 @@ modo de solo lectura, como indica la nota sobre DuckDB al inicio de este README.
 
 ## Como generar los resultados principales
 
-<!-- TODO -->
+### Ejercicio 7: indicadores y tablero en Metabase
+
+Requiere los datos descargados y el ambiente arriba.
+
+```bash
+docker compose exec lab python scripts/construir_tablero.py   # base del tablero
+docker compose exec lab python scripts/metabase_tablero.py    # crea o actualiza el tablero
+```
+
+El segundo comando imprime la URL del tablero en <http://localhost:3000>. Si
+Metabase no está configurado, crea el administrador `lab8@example.com` /
+`lab8-duckdb-2026`. Tras reconstruir la base hay que reiniciar Metabase
+(`docker compose restart metabase`). Los resultados están en
+`notebooks/05_indicadores.ipynb` y la documentación en
+[`docs/ejercicio7.md`](docs/ejercicio7.md).
