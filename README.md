@@ -361,3 +361,12 @@ docker compose exec lab jupyter nbconvert --to notebook --execute --inplace \
 ```
 
 La documentación está en [`docs/ejercicio8.md`](docs/ejercicio8.md).
+
+### Ejercicio 9: discusión
+
+Las respuestas están en [`docs/ejercicio9.md`](docs/ejercicio9.md). La
+comparación de memoria con pandas (9.4) se reproduce con:
+
+```bash
+docker compose exec lab python scripts/memoria_pandas.py
+```
